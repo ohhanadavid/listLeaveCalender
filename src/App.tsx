@@ -172,6 +172,26 @@ function App() {
               {isApproverMode ? (
                 <div className="settings-fields" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                   <div className="form-group">
+                    <label htmlFor="board-start-date">תאריך התחלה של הלוח:</label>
+                    <input 
+                      type="date" 
+                      id="board-start-date"
+                      value={appData.settings.boardStartDate}
+                      onChange={(e) => updateSettings({ boardStartDate: e.target.value })}
+                      className="form-control"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="board-end-date">תאריך סיום של הלוח:</label>
+                    <input 
+                      type="date" 
+                      id="board-end-date"
+                      value={appData.settings.boardEndDate}
+                      onChange={(e) => updateSettings({ boardEndDate: e.target.value })}
+                      className="form-control"
+                    />
+                  </div>
+                  <div className="form-group">
                     <label htmlFor="min-staff">מינימום עובדים ביום:</label>
                     <input 
                       type="number" 
@@ -196,8 +216,22 @@ function App() {
                   </div>
                 </div>
               ) : (
-                <div className="alert alert-warning" style={{ fontSize: '0.85rem' }}>
-                  עליך להיות במצב מנהל כדי לשנות את הגדרות המערכת.
+                <div className="settings-fields-readonly" style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem', fontSize: '0.9rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <strong>תאריך התחלה:</strong>
+                    <span>{appData.settings.boardStartDate}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <strong>תאריך סיום:</strong>
+                    <span>{appData.settings.boardEndDate}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <strong>מינימום עובדים ביום:</strong>
+                    <span>{appData.settings.minStaffPerDay}</span>
+                  </div>
+                  <div className="alert alert-warning" style={{ fontSize: '0.8rem', padding: '0.5rem', marginTop: '0.5rem' }}>
+                    עליך להיות במצב מנהל כדי לשנות הגדרות אלו.
+                  </div>
                 </div>
               )}
             </div>
