@@ -12,15 +12,19 @@ export interface LeavePattern {
   leaveDays: number;
   startDate: string; // ISO date YYYY-MM-DD
   isActive: boolean;
+  LeaveRequestSource: LeaveRequestSource;
+  
 }
 
-export type LeaveRequestType = 'full' | 'hours';
+export type LeaveRequestType = 'full' | 'hours' | 'outgoing' | 'incoming';
+
 export type LeaveRequestStatus = 'pending' | 'approved' | 'rejected';
 export type LeaveRequestSource = 'auto' | 'manual' | 'request';
 
 export interface LeaveRequest {
   id: string;
   employeeId: string;
+  requestId: string; // Optional: ID of the leave pattern that generated this request
   date: string; // ISO date YYYY-MM-DD
   type: LeaveRequestType;
   startTime?: string; // HH:MM format

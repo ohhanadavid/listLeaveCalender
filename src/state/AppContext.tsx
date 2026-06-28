@@ -42,12 +42,17 @@ interface AppContextType {
   addEmployee: (name: string, color: string) => void;
   updateEmployee: (id: string, name: string, color: string) => void;
   toggleEmployeeActive: (id: string) => void;
+  deactivateEmployee: (id: string, deleteMode: 'all' | 'future' | 'none') => void;
+  hardDeleteEmployee: (id: string) => void;
+
   addLeavePattern: (pattern: Omit<LeavePattern, 'id'>) => void;
   updateLeavePattern: (id: string, pattern: Partial<LeavePattern>, updateMode?: 'future' | 'rebuild') => void;
   addManualLeaveRange: (employeeId: string, startDate: string, endDate: string) => void;
   addLeaveRequest: (request: Omit<LeaveRequest, 'id'>) => void;
   updateLeaveRequestStatus: (id: string, status: LeaveRequest['status']) => void;
+  updateLeaveRequest: (id: string, updates: Partial<LeaveRequest>) => void;
   deleteLeaveRequest: (id: string) => void;
+  deleteLeaveRequestRange: (employeeId: string, startDate: string, endDate: string, sourceFilter: 'all' | 'auto' | 'manual') => void;
   addAttendanceLog: (log: Omit<AttendanceLog, 'id'>) => void;
   updateSettings: (settings: Partial<Settings>) => void;
 }
@@ -61,7 +66,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [writeError, setWriteError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [fileNeedsPermission, setFileNeedsPermission] = useState<boolean>(false);
-  
   const isFileSystemSupported = typeof window !== 'undefined' && 'showOpenFilePicker' in window;
   
   const isSavingRef = useRef<boolean>(false);
@@ -104,6 +108,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       triggerSave(appData, fileHandle);
     }
   }, [appData, fileHandle, triggerSave]);
+
+
 
   // Restore file handle from IndexedDB on initialization
   useEffect(() => {
@@ -316,6 +322,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }));
   };
 
+  const deactivateEmployee = (id: string, deleteMode: 'all' | 'future' | 'none') => {
+    if (!isApproverMode) return;
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    
+    setAppData((prev) => {
+      const updatedEmployees = prev.employees.map((emp) =>
+        emp.id === id ? { ...emp, active: false } : emp
+      );
+
+      let updatedRequests = prev.leaveRequests;
+      if (deleteMode === 'all') {
+        updatedRequests = prev.leaveRequests.filter((req) => req.employeeId !== id);
+      } else if (deleteMode === 'future') {
+        updatedRequests = prev.leaveRequests.filter(
+          (req) => !(req.employeeId === id && req.date > todayStr)
+        );
+      }
+
+      return {
+        ...prev,
+        employees: updatedEmployees,
+        leaveRequests: updatedRequests,
+      };
+    });
+  };
+
+  const hardDeleteEmployee = (id: string) => {
+    if (!isApproverMode) return;
+    setAppData((prev) => ({
+      ...prev,
+      employees: prev.employees.filter((emp) => emp.id !== id),
+      leaveRequests: prev.leaveRequests.filter((req) => req.employeeId !== id),
+      leavePatterns: prev.leavePatterns.filter((pat) => pat.employeeId !== id),
+      attendanceLogs: prev.attendanceLogs.filter((log) => log.employeeId !== id),
+    }));
+  };
+
+
   const addLeavePattern = (patternInput: Omit<LeavePattern, 'id'>) => {
     if (!isApproverMode) return;
     const newId = crypto.randomUUID();
@@ -413,9 +457,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addManualLeaveRange = (employeeId: string, startDate: string, endDate: string) => {
     if (!isApproverMode) return;
-    
+    const requestId = crypto.randomUUID(); // Unique ID for this manual range
     // Generate manual requests
-    const generatedRequests = generateManualRangeLeaveRequests(employeeId, startDate, endDate);
+    const generatedRequests = generateManualRangeLeaveRequests(employeeId, requestId, startDate, endDate);
 
     setAppData((prev) => {
       // Overwrite/Remove any existing requests on those exact dates for this employee to avoid double requests
@@ -456,12 +500,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }));
   };
 
+  const updateLeaveRequest = (id: string, updates: Partial<LeaveRequest>) => {
+    if (!isApproverMode) return;
+    setAppData((prev) => ({
+      ...prev,
+      leaveRequests: prev.leaveRequests.map((req) =>
+        req.id === id ? { ...req, ...updates } : req
+      ),
+    }));
+  };
+
   const deleteLeaveRequest = (id: string) => {
     if (!isApproverMode) return;
     setAppData((prev) => ({
       ...prev,
       leaveRequests: prev.leaveRequests.filter((req) => req.id !== id),
     }));
+  };
+
+  const deleteLeaveRequestRange = (
+    employeeId: string,
+    startDate: string,
+    endDate: string,
+    sourceFilter: 'all' | 'auto' | 'manual'
+  ) => {
+    if (!isApproverMode) {
+      console.warn('deleteLeaveRequestRange blocked: not in Approver Mode');
+      return;
+    }
+    console.log('Executing deleteLeaveRequestRange:', { employeeId, startDate, endDate, sourceFilter });
+    setAppData((prev) => {
+      const filtered = prev.leaveRequests.filter((req) => {
+        const matchesEmployee = req.employeeId === employeeId;
+        const matchesDate = req.date >= startDate && req.date <= endDate;
+        const matchesSource =
+          sourceFilter === 'all' ||
+          (sourceFilter === 'auto' && req.source === 'auto') ||
+          (sourceFilter === 'manual' && (req.source === 'manual' || req.source === 'request'));
+        
+        const isMatch = matchesEmployee && matchesDate && matchesSource;
+        if (isMatch) {
+          console.log('Deleting leave request:', req);
+        }
+        return !isMatch;
+      });
+      return {
+        ...prev,
+        leaveRequests: filtered,
+      };
+    });
   };
 
   const addAttendanceLog = (log: Omit<AttendanceLog, 'id'>) => {
@@ -536,12 +623,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addEmployee,
         updateEmployee,
         toggleEmployeeActive,
+        deactivateEmployee,
+        hardDeleteEmployee,
+       
         addLeavePattern,
         updateLeavePattern,
         addManualLeaveRange,
         addLeaveRequest,
         updateLeaveRequestStatus,
+        updateLeaveRequest,
         deleteLeaveRequest,
+        deleteLeaveRequestRange,
         addAttendanceLog,
         updateSettings,
       }}

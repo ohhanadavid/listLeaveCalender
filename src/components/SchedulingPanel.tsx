@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../state/AppContext';
-import type { LeavePattern } from '../types';
+import type { LeavePattern, LeaveRequest } from '../types';
 import { getDaysDiff } from '../utils/scheduling';
 
 export const SchedulingPanel: React.FC = () => {
@@ -10,6 +10,7 @@ export const SchedulingPanel: React.FC = () => {
     addLeavePattern,
     updateLeavePattern,
     addManualLeaveRange,
+    deleteLeaveRequestRange,
   } = useApp();
 
   const activeEmployees = appData.employees.filter((emp) => emp.active);
@@ -38,6 +39,18 @@ export const SchedulingPanel: React.FC = () => {
   const [manualError, setManualError] = useState<string | null>(null);
   const [manualSuccess, setManualSuccess] = useState<string | null>(null);
   const [cycleSuccess, setCycleSuccess] = useState<string | null>(null);
+
+  // Form states for Deleting Range
+  const [deleteEmp, setDeleteEmp] = useState('');
+  const [deleteStart, setDeleteStart] = useState(new Date().toISOString().split('T')[0]);
+  const [deleteEnd, setDeleteEnd] = useState(new Date().toISOString().split('T')[0]);
+  const [deleteSource, setDeleteSource] = useState<'all' | 'auto' | 'manual'>('all');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
+
+  // State for preview modal
+  const [matchingLeaves, setMatchingLeaves] = useState<LeaveRequest[]>([]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Handle adding cyclical pattern
   const handleAddCycle = (e: React.FormEvent) => {
@@ -68,7 +81,11 @@ export const SchedulingPanel: React.FC = () => {
       leaveDays,
       startDate: cycleStart,
       isActive: true,
+      LeaveRequestSource: 'auto'
+      
     });
+
+    
 
     setCycleSuccess('הדפוס המחזורי נוצר והוזן ללוח בהצלחה!');
     setCycleEmp('');
@@ -103,6 +120,56 @@ export const SchedulingPanel: React.FC = () => {
     addManualLeaveRange(manualEmp, manualStart, manualEnd);
     setManualSuccess(`חופשה ידנית נרשמה בהצלחה ל-${rangeLength + 1} ימים!`);
     setManualEmp('');
+  };
+
+  // Handle requesting delete range (open preview modal)
+  const handleRequestDeleteRange = (e: React.FormEvent) => {
+    e.preventDefault();
+    setDeleteError(null);
+    setDeleteSuccess(null);
+
+    console.log('Requesting delete range:', { deleteEmp, deleteStart, deleteEnd, deleteSource });
+
+    if (!deleteEmp) {
+      setDeleteError('נא לבחור עובד/ת');
+      return;
+    }
+
+    const rangeLength = getDaysDiff(deleteStart, deleteEnd);
+    if (rangeLength < 0) {
+      setDeleteError('תאריך סיום אינו יכול להיות לפני תאריך התחלה');
+      return;
+    }
+
+    // Find matching leaves
+    const matches = appData.leaveRequests.filter((req) => {
+      const matchesEmployee = req.employeeId === deleteEmp;
+      const matchesDate = req.date >= deleteStart && req.date <= deleteEnd;
+      const matchesSource =
+        deleteSource === 'all' ||
+        (deleteSource === 'auto' && req.source === 'auto') ||
+        (deleteSource === 'manual' && (req.source === 'manual' || req.source === 'request'));
+      return matchesEmployee && matchesDate && matchesSource;
+    });
+
+    console.log('Found matching leaves:', matches);
+
+    if (matches.length === 0) {
+      setDeleteError('לא נמצאו רשומות חופשה מתאימות למחיקה בטווח המבוקש');
+      return;
+    }
+
+    setMatchingLeaves(matches);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleExecuteDeleteRange = () => {
+    console.log('Executing delete range action with:', { deleteEmp, deleteStart, deleteEnd, deleteSource, count: matchingLeaves.length });
+    deleteLeaveRequestRange(deleteEmp, deleteStart, deleteEnd, deleteSource);
+    setDeleteSuccess(`נמחקו בהצלחה ${matchingLeaves.length} רשומות חופשה!`);
+    setShowDeleteConfirm(false);
+    setMatchingLeaves([]);
+    setDeleteEmp('');
   };
 
   const getEmployeeName = (id: string) => {
@@ -160,10 +227,12 @@ export const SchedulingPanel: React.FC = () => {
     updateLeavePattern(pattern.id, { isActive: !pattern.isActive }, 'future');
   };
 
+  
+
   return (
     <div className="scheduling-panel">
       {isApproverMode ? (
-        <div className="scheduling-forms-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.8rem' }}>
+        <div className="scheduling-forms-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginBottom: '1.8rem' }}>
           
           {/* Form 1: Cyclical Pattern */}
           <div className="card">
@@ -290,6 +359,77 @@ export const SchedulingPanel: React.FC = () => {
             </form>
           </div>
 
+          {/* Form 3: Delete Range */}
+          <div className="card" style={{ borderColor: 'var(--conflict-color)' }}>
+            <h3 style={{ color: 'var(--conflict-color)' }}>מחיקת טווח ימים</h3>
+            <p className="description">מוחק רשומות חופשה בטווח תאריכים מוגדר לעובד/ת.</p>
+            
+            <form onSubmit={handleRequestDeleteRange} className="form-column" style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+              <div className="form-group">
+                <label htmlFor="delete-emp">בחר עובד/ת:</label>
+                <select 
+                  id="delete-emp" 
+                  value={deleteEmp} 
+                  onChange={(e) => setDeleteEmp(e.target.value)} 
+                  className="form-control"
+                >
+                  <option value="">-- בחר עובד/ת --</option>
+                  {activeEmployees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label htmlFor="delete-start">מתאריך:</label>
+                  <input 
+                    type="date" 
+                    id="delete-start" 
+                    value={deleteStart} 
+                    min={appData.settings.boardStartDate}
+                    max={appData.settings.boardEndDate}
+                    onChange={(e) => setDeleteStart(e.target.value)} 
+                    className="form-control"
+                  />
+                </div>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label htmlFor="delete-end">עד תאריך:</label>
+                  <input 
+                    type="date" 
+                    id="delete-end" 
+                    value={deleteEnd} 
+                    min={appData.settings.boardStartDate}
+                    max={appData.settings.boardEndDate}
+                    onChange={(e) => setDeleteEnd(e.target.value)} 
+                    className="form-control"
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="delete-source">סנן לפי מקור רשומה:</label>
+                <select 
+                  id="delete-source" 
+                  value={deleteSource} 
+                  onChange={(e) => setDeleteSource(e.target.value as 'all' | 'auto' | 'manual')} 
+                  className="form-control"
+                >
+                  <option value="all">כל הרשומות</option>
+                  <option value="auto">רק אוטומטיות (מחזוריות)</option>
+                  <option value="manual">רק ידניות (טווחים ידניים)</option>
+                </select>
+              </div>
+
+              {deleteError && <div className="form-error-msg">{deleteError}</div>}
+              {deleteSuccess && <div className="alert alert-info" style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }}>{deleteSuccess}</div>}
+
+              <button type="submit" className="btn btn-danger" style={{ width: '100%' }}>
+                מחק טווח חופשות
+              </button>
+            </form>
+          </div>
+
         </div>
       ) : (
         <div className="alert alert-warning" style={{ marginBottom: '1.8rem', fontSize: '0.9rem' }}>
@@ -347,10 +487,17 @@ export const SchedulingPanel: React.FC = () => {
                           </button>
                           <button 
                             type="button" 
-                            className={`btn btn-sm ${pat.isActive ? 'btn-danger' : 'btn-teal'}`}
+                            className={`btn btn-sm ${pat.isActive ? 'btn-warning' : 'btn-teal'}`}
                             onClick={() => togglePatternActive(pat)}
                           >
                             {pat.isActive ? 'השהה' : 'הפעל'}
+                          </button>
+                          <button 
+                            type="button" 
+                            className={`btn btn-sm btn-danger`}
+                            onClick={() => togglePatternActive(pat)}
+                          >
+                            מחק
                           </button>
                         </div>
                       </td>
@@ -448,6 +595,54 @@ export const SchedulingPanel: React.FC = () => {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete Range Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="pin-modal-overlay" onClick={() => setShowDeleteConfirm(false)}>
+          <div className="pin-modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', width: '100%' }}>
+            <button type="button" className="pin-modal-close" onClick={() => setShowDeleteConfirm(false)}>×</button>
+            
+            <h3 style={{ color: 'var(--conflict-color)', marginBottom: '1rem', borderBottom: '2px solid var(--border-color)', paddingBottom: '0.5rem', textAlign: 'right' }}>
+              אישור מחיקת טווח חופשות
+            </h3>
+
+            <div className="popover-body" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.8rem', textAlign: 'right' }}>
+              <div style={{ fontWeight: '600', fontSize: '1.05rem', color: '#1F2933' }}>
+                נמצאו {matchingLeaves.length} רשומות חופשה למחיקה עבור העובד/ת {getEmployeeName(deleteEmp)}:
+              </div>
+
+              <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', padding: '0.8rem', background: '#F8F9FA' }}>
+                <ul style={{ listStyleType: 'none', padding: 0, margin: 0 }}>
+                  {matchingLeaves.map((req) => (
+                    <li key={req.id} style={{ padding: '0.4rem 0', borderBottom: '1px solid #E2E5E8', fontSize: '0.9rem' }}>
+                      📅 {req.date} — {
+                        req.type === 'full' ? 'יום מלא' :
+                        req.type === 'hours' ? 'שעות' :
+                        req.type === 'outgoing' ? 'יציאה' : 'חזרה'
+                      } ({
+                        req.source === 'auto' ? 'מחזורי' : 'ידני'
+                      })
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div style={{ color: 'var(--conflict-color)', fontWeight: '700', marginTop: '0.5rem' }}>
+                ⚠️ אזהרה: פעולה זו תמחק את כל הרשומות המופיעות למעלה לצמיתות.
+              </div>
+
+              <div className="btn-group" style={{ marginTop: '1rem', justifyContent: 'flex-start', width: '100%' }}>
+                <button type="button" className="btn btn-danger" onClick={handleExecuteDeleteRange}>
+                  מחק רשומות אלו
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowDeleteConfirm(false)}>
+                  בטל
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
